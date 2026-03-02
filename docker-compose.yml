@@ -1,0 +1,9 @@
+version: "3.9"
+
+services:
+  ags_model:
+    build: .
+    container_name: ags_model_validation
+    volumes:
+      - .:/app
+    restart: unless-stopped
