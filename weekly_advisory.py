@@ -270,9 +270,11 @@ class dynamic_classes:
                 try:
                     # read file
                     wth_folder = self.advisory_date.strftime("%Y%m%d")
-                    wth_file_path = os.path.join(self.config['weather_dir'],os.path.join(f"{wth_folder}",f"{wth_folder}_daily.nc"))
-                    # wth_file_url = f"https://nc.niruthi.in/ncfiles/{wth_folder}/{wth_folder}_daily.nc"  
-                    forecast_data = weather(file_url=wth_file_path,latitude=self.lat,longitude=self.long).get_data()
+                    # wth_file_path = os.path.join(self.config['weather_dir'],os.path.join(f"{wth_folder}",f"{wth_folder}_daily.nc"))
+                    wth_file_url = f"https://nc.niruthi.in/ncfiles/{wth_folder}/{wth_folder}_daily.nc"  
+                    # forecast_data = weather(file_url=wth_file_path,latitude=self.lat,longitude=self.long).get_data()
+                    forecast_data = weather(file_url=wth_file_url,latitude=self.lat,longitude=self.long).get_data()
+
                     # Weather Probability
                     advisory_probability = probability(df=self.database,weather_dict=forecast_data,config=self.config).get_probability()
                     matching_record = self.database.iloc[np.where(advisory_probability==advisory_probability.max())[0],:].to_dict(orient='records')
@@ -287,10 +289,13 @@ class dynamic_classes:
                 try:
                     # read weather file
                     wth_folder = self.advisory_date.strftime("%Y%m%d")
-                    wth_file_path = os.path.join(self.config['weather_dir'],os.path.join(f"{wth_folder}",f"{wth_folder}_daily.nc"))
-                    # wth_file_url = f"http://nc.niruthi.in/ncfiles/{wth_folder}/{wth_folder}_daily.nc"          
+                    # wth_file_path = os.path.join(self.config['weather_dir'],os.path.join(f"{wth_folder}",f"{wth_folder}_daily.nc"))
+                    wth_file_url = f"http://nc.niruthi.in/ncfiles/{wth_folder}/{wth_folder}_daily.nc"
+                    print(wth_file_url)          
                     # Weather Probability
-                    forecast_data = weather(file_url=wth_file_path,latitude=self.lat,longitude=self.long).get_data()
+                    # forecast_data = weather(file_url=wth_file_path,latitude=self.lat,longitude=self.long).get_data()
+                    forecast_data = weather(file_url=wth_file_url,latitude=self.lat,longitude=self.long).get_data()
+
                     # If forecast_data is empty (file missing), handle gracefully
                     if not forecast_data:
                         print(f"No weather data available for {wth_folder}, skipping advisory.")
@@ -459,8 +464,9 @@ class weather:
     def get_data(self) -> dict:
         print("weather_file in get data: ", self.file)
         try:
-            # self.weather = xr.open_dataset(BytesIO(requests.get(self.file,stream=True).content), engine="scipy") # if it is Hosted NAS Access
-            self.weather = xr.open_dataset(self.file)  # if accessing from Local NAS
+            self.weather = xr.open_dataset(BytesIO(requests.get(self.file,stream=True).content), engine="scipy") # if it is Hosted NAS Access
+            print("Weather File info: File read from public path.")
+            # self.weather = xr.open_dataset(self.file)  # if accessing from Local NAS
             self.rain_min = self.weather['Rainfall'].sel(Latitude=self.lat, Longitude=self.long, method='nearest').resample(Date_time="W").min().values[0]
             self.rain_max = self.weather['Rainfall'].sel(Latitude=self.lat, Longitude=self.long, method='nearest').resample(Date_time="W").max().values[0]
             self.rain_avg = self.weather['Rainfall'].sel(Latitude=self.lat, Longitude=self.long, method='nearest').resample(Date_time="W").mean().values[0]
