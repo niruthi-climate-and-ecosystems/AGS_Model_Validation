@@ -676,38 +676,38 @@ def main():
     # pass
 
 if __name__ == "__main__":
-    # main()
-    import geopandas as gpd
-    import fsspec
-    from concurrent.futures import ThreadPoolExecutor
+    # # main()
+    # import geopandas as gpd
+    # import fsspec
+    # from concurrent.futures import ThreadPoolExecutor
 
-    block_shp = gpd.read_file(r"shapefile\Odisha_block_shapefile.shp")
-    # block_shp = block_shp[block_shp['district_n']=="Kendrapada"]
-    district_filter = ['Ganjam','Kalahandi','Cuttack','Kendrapada','Baleswar','Keonjhar','Koraput','Sundargarh','Mayurbhanja','Bargarh','Bolangir']
+    # block_shp = gpd.read_file(r"shapefile/Odisha_block_shapefile.shp")
+    # # block_shp = block_shp[block_shp['district_n']=="Kendrapada"]
+    # district_filter = ['Ganjam','Kalahandi','Cuttack','Kendrapada','Baleswar','Keonjhar','Koraput','Sundargarh','Mayurbhanja','Bargarh','Bolangir']
 
-    block_shp = block_shp.loc[block_shp['district_n'].isin(district_filter)]
-    block_shp['latitude'] = block_shp.centroid.y
-    block_shp['longitude'] = block_shp.centroid.x
-    crops = ['Blackgram','Paddy','Greengram','Potato','Mustard']
-    season = "Rabi"
-    sowing_date_file = read_csv(r"data\Predicted_Sowing_Date\All_Crops_Rabi_block_level.csv")
-    empty_df = []
-    for crop in crops:
-        print("Crop_name: ",crop)
-        for i,block in block_shp.iterrows():
-            block_data = block.to_dict()
-            print("Block_Data: ",block_data)
-            sowing_date_ = sowing_date_file[(sowing_date_file['Crop_name']==crop)&(sowing_date_file['Unq']==block_data['Unq'])]
-            sowing_dt = datetime.strptime(sowing_date_['Sowing_date'].values[0],"%Y-%m-%d").date()
-            crop_adviosory_data = weekly_adviosry(season=season,crop_name=crop,sowing_date=sowing_date_['Sowing_date'].values[0],latitude=block_data['latitude'],longitude=block_data['longitude'],elevation=100,realtime=0,current_date=datetime.today()+timedelta(days=-1)).generate()
-            crop_adviosory_data['District'] = block_data['district_n']
-            crop_adviosory_data['Block'] = block_data['block_name']
-            crop_adviosory_data['Adviosry_Date']= (datetime.today()+timedelta(days=-1)).strftime("%Y-%m-%d")
-            crop_adviosory_data['Sowing_Date']= sowing_dt.strftime("%Y-%m-%d")
-            crop_adviosory_data['Latitude'] = block_data['latitude']
-            crop_adviosory_data['Longitude'] = block_data['longitude']
-            empty_df.append(crop_adviosory_data)
-    # for t in empty_df:
-    #     print(t,type(t))
-    df = concat(empty_df,ignore_index=False)
-    df.to_csv("Rabi_advisory_odisha_27012026_weekly.csv",index=False,encoding="utf-8-sig")
+    # block_shp = block_shp.loc[block_shp['district_n'].isin(district_filter)]
+    # block_shp['latitude'] = block_shp.centroid.y
+    # block_shp['longitude'] = block_shp.centroid.x
+    # crops = ['Blackgram','Paddy','Greengram','Potato','Mustard']
+    # season = "Rabi"
+    # sowing_date_file = read_csv(r"data\Predicted_Sowing_Date\All_Crops_Rabi_block_level.csv")
+    # empty_df = []
+    # for crop in crops:
+    #     print("Crop_name: ",crop)
+    #     for i,block in block_shp.iterrows():
+    #         block_data = block.to_dict()
+    #         print("Block_Data: ",block_data)
+    #         sowing_date_ = sowing_date_file[(sowing_date_file['Crop_name']==crop)&(sowing_date_file['Unq']==block_data['Unq'])]
+    #         sowing_dt = datetime.strptime(sowing_date_['Sowing_date'].values[0],"%Y-%m-%d").date()
+    #         crop_adviosory_data = weekly_adviosry(season=season,crop_name=crop,sowing_date=sowing_date_['Sowing_date'].values[0],latitude=block_data['latitude'],longitude=block_data['longitude'],elevation=100,realtime=0,current_date=datetime.today()+timedelta(days=-1)).generate()
+    #         crop_adviosory_data['District'] = block_data['district_n']
+    #         crop_adviosory_data['Block'] = block_data['block_name']
+    #         crop_adviosory_data['Adviosry_Date']= (datetime.today()+timedelta(days=-1)).strftime("%Y-%m-%d")
+    #         crop_adviosory_data['Sowing_Date']= sowing_dt.strftime("%Y-%m-%d")
+    #         crop_adviosory_data['Latitude'] = block_data['latitude']
+    #         crop_adviosory_data['Longitude'] = block_data['longitude']
+    #         empty_df.append(crop_adviosory_data)
+    # # for t in empty_df:
+    # #     print(t,type(t))
+    # df = concat(empty_df,ignore_index=False)
+    # df.to_csv("Rabi_advisory_odisha_27012026_weekly.csv",index=False,encoding="utf-8-sig")
