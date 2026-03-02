@@ -1,5 +1,5 @@
 # Use lightweight Python image
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 # Prevent python from writing pyc files
 ENV PYTHONDONTWRITEBYTECODE=1
