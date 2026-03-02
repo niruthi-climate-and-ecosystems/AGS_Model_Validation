@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 {
     "sowing_date_file":"data/sowing_dates.csv",
     "crop_calendar":"data/Combined_updated_18_11_25.csv",
@@ -15,22 +14,4 @@
         "Other_Kharif":"data/Predicted_Sowing_Date/Other_Crops_Kharif.csv",
         "All_Rabi":"data/Predicted_Sowing_Date/All_Crops_Rabi_block_level.csv"
     }
-=======
-{
-    "sowing_date_file":"data/sowing_dates.csv",
-    "crop_calendar":"data/Combined_updated_18_11_25.csv",
-    "weather_dir_public":"https://nc.niruthi.in/ncfiles",
-    "weather_dir":"Z:/FORECAST_PRODUCT/GFS",
-    "pest_info":"data/Pest&Disease_content_17_11_25.csv",
-    "shapefile":"updated_weekly/shapefile/Odisha_block_shapefile.shp",
-    "monsoon_onset":"monsoon_records.csv",
-    "prabability_parameters":["rain_mean","temp_min","temp_max","rh_min","rh_max"],
-
-    "Section-2":"Sowing Date Files",
-    "Sowing_files":{
-        "Paddy_Kharif":"data/Predicted_Sowing_Date/Paddy_Kharif.csv",
-        "Other_Kharif":"data/Predicted_Sowing_Date/Other_Crops_Kharif.csv",
-        "All_Rabi":"data/Predicted_Sowing_Date/All_Crops_Rabi_block_level.csv"
-    }
->>>>>>> d4d0faf2b9d906823c928f52b65bbcce412a3539
 }

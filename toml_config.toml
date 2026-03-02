@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # This is TOML file configuration for Database API's - KSH/GF Project
 
 # Version information
@@ -13,19 +12,3 @@ User ="postgres"
 Password = "Niruthi_2025!PG"
 Port = 5432
 
-=======
-# This is TOML file configuration for Database API's - KSH/GF Project
-
-# Version information
-title = "Gates Foundation Shapefile acess API"
-version = 1.0
-
-# Database login information
-[Database]
-Database_name = "niruthi_db"
-Host = "bmgf-db.cutss4svfc0w.ap-south-1.rds.amazonaws.com"
-User ="postgres"
-Password = "Niruthi_2025!PG"
-Port = 5432
-
->>>>>>> d4d0faf2b9d906823c928f52b65bbcce412a3539
