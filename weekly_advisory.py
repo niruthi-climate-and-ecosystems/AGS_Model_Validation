@@ -38,6 +38,8 @@ class WeeklyAdvisoryRequest(BaseModel):
     lat: float = 21.44
     lon: float = 85.15
     elevation: int = 100
+    weekly_advisory: str
+
 
 @app.post("/validate/weekly_advisory/")
 async def crop_advisory(request: WeeklyAdvisoryRequest):
@@ -47,6 +49,11 @@ async def crop_advisory(request: WeeklyAdvisoryRequest):
 
     if request.current_date is None:
         request.current_date = datetime.now().strftime("%Y-%m-%d")
+    global IS_WEEKLY
+    if request.weekly_advisory == "False":        
+        IS_WEEKLY = False
+    else:
+        IS_WEEKLY = True
 
     print(
         "current date, sowing date:",
@@ -668,14 +675,15 @@ class weekly_adviosry:
 
 
 def main():
-    input_config = json.load(open("input_config.json"))
-    # print(input_config)
-    print("in main weekly advisory")
-    weekly_adviosry(season="Kharif",crop_name="Paddy",sowing_date=datetime(2025,7,1),latitude=24.56,longitude=82.45,elevation=100).generate()
-    print("in main after....weekly advisory")
-    # pass
+    # input_config = json.load(open("input_config.json"))
+    # # print(input_config)
+    # print("in main weekly advisory")
+    # weekly_adviosry(season="Kharif",crop_name="Paddy",sowing_date=datetime(2025,7,1),latitude=24.56,longitude=82.45,elevation=100).generate()
+    # print("in main after....weekly advisory")
+    pass
 
 if __name__ == "__main__":
+    main()
     # # main()
     # import geopandas as gpd
     # import fsspec
