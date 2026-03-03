@@ -6,4 +6,6 @@ services:
     container_name: ags_model_validation
     volumes:
       - .:/app
+    ports:
+      - "8090:8000"
     restart: unless-stopped
