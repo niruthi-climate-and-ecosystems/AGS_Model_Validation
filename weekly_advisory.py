@@ -28,6 +28,30 @@ app = FastAPI()
 from pydantic import BaseModel
 from typing import List, Dict, Any
 
+
+# GFS Data EndPoint
+class GFSWeather(BaseModel):
+    lat:float
+    lon:float
+    date:str
+
+@app.post("/gfs-weather/")
+def get_GFSWeather(request:GFSWeather):
+    if request.date:
+        wth_folder = datetime.strptime(request.date,"%Y-%m-%d").strftime("%Y%m%d")
+        wth_file_url = f"https://nc.niruthi.in/ncfiles/{wth_folder}/{wth_folder}_daily.nc"
+        ds = xr.open_dataset(BytesIO(requests.get(wth_file_url,stream=True).content),engine="scipy")
+        ds = ds.isel(Date_time=slice(0,7)).sel(Latitude=request.lat,Longitude=request.lon,method='nearest')
+        print(ds)
+        
+        return json.dumps(dict(rain_sum=round(float(ds['Rainfall'].values.sum()),3),
+                    temp_min =round(float(ds['Tmin'].values.mean()),3),
+                    temp_max=round(float(ds['Tmax'].values.mean()),3),
+                    rh_min = round(float(ds['RH_min'].values.mean()),3),
+                    rh_max = round(float(ds['RH_max'].values.mean()),3)
+                    ))
+
+# Generate Adviosry End Point
 class WeeklyAdvisoryRequest(BaseModel):
     season: str
     crop_name: str
@@ -83,56 +107,6 @@ async def crop_advisory(request: WeeklyAdvisoryRequest):
     print("cleaned data: ",type(cleaned_data))
 
     return cleaned_data.to_json()
-
-
-# @app.post("/validate/weekly_advisory/")
-# async def crop_advisory(
-#     season: str,
-#     crop_name: str,
-#     sowing_date: str,
-#     current_date: str,
-#     weather_json: dict,
-#     weather_input = "manual",
-#     lat: float=21.44,
-#     lon: float=85.15,
-#     elevation: int=100, #| None = None,
-#      #| None = None
-# ):
-#     """
-#     season: str,\n
-#     crop_name: str,\n
-#     sowing_date: "YYYY-MM-DD",\n
-#     current_date: "YYYY-MM-DD"\n
-#     """
-#     # Default fallbacks
-#     if elevation is None:
-#         elevation = 100
-#     if current_date is None:
-#         current_date = datetime.now().strftime("%Y-%m-%d")
-
-#     print("current date, sowing date:", season, crop_name, sowing_date, lat, lon, current_date,elevation)
-
-#     # Call advisory function
-#     get_response = weekly_adviosry(
-#         season=season,
-#         crop_name=crop_name,
-#         sowing_date=sowing_date,
-#         latitude=lat,
-#         longitude=lon,
-#         elevation=elevation,
-#         current_date=datetime.strptime(current_date,"%Y-%m-%d"),
-#         weather_input=weather_input,
-#         weather_dict=weather_json,
-#     )
-
-#     raw_data = get_response.generate()
-#     print(raw_data)
-#     cleaned_data = clean_nan(raw_data)
-
-#     # Convert DataFrame → dict for valid JSON
-#     data_dict = json.loads(cleaned_data.to_json())#type:ignore
-
-#     return JSONResponse(content=data_dict, status_code=200)
 
 def clean_nan(obj):
     if isinstance(obj, float) and math.isnan(obj):
