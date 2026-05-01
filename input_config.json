@@ -1,9 +1,9 @@
 {
     "sowing_date_file":"data/sowing_dates.csv",
-    "crop_calendar":"data/Combined_updated_18_11_25.csv",
+    "crop_calendar":"data/Combined_updated_30_04_2026.csv",
     "weather_dir_public":"https://nc.niruthi.in/ncfiles",
     "weather_dir":"Z:/FORECAST_PRODUCT/GFS",
-    "pest_info":"data/Pest&Disease_content_17_11_25.csv",
+    "pest_info":"data/Pest&Disease_content_30_04_26.csv",
     "shapefile":"updated_weekly/shapefile/Odisha_block_shapefile.shp",
     "monsoon_onset":"monsoon_records.csv",
     "prabability_parameters":["rain_mean","temp_min","temp_max","rh_min","rh_max"],
