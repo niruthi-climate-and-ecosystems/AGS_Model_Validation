@@ -601,7 +601,11 @@ class weekly_adviosry:
                             advisory_dictionary.append(advisory_data)
                         else:
                             # print(type(advisory_data))
-                            advisory_dictionary.append(advisory_data.to_dict(orient="records")) #type:ignore
+                            if advisory_data is not None:
+                                advisory_dictionary.append(advisory_data.to_dict(orient="records")) #type:ignore
+                            else:
+                                print(type(advisory_data))
+                                print("advisory_data is None, skipping")
 
                     elif adv_df['advisory_type'].values[0]=="Standard":
                         advisory_data = adv_df
@@ -630,7 +634,11 @@ class weekly_adviosry:
                             advisory_dictionary.append(advisory_data)
                         else:
                             # print(type(advisory_data))
-                            advisory_dictionary.append(advisory_data.to_dict(orient="records")) #type:ignore
+                            if advisory_data is not None:
+                                advisory_dictionary.append(advisory_data.to_dict(orient="records")) #type:ignore
+                            else:
+                                print(type(advisory_data))
+                                print("advisory_data is None, skipping")
 
                 elif adv_df['advisory_type'].values[0]=="Standard":
                     advisory_data = adv_df
