@@ -4,7 +4,7 @@
 IS_WEEKLY = True
 
 import os
-from pandas import *
+import pandas as pd
 import json
 from datetime import datetime,timedelta,date
 import numpy as np
@@ -15,6 +15,7 @@ import tqdm
 import requests
 import fsspec
 from io import BytesIO
+from functools import lru_cache
 
 warnings.filterwarnings("ignore")
 
@@ -22,11 +23,13 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 import math
 import xarray as xr
+from scripts.pest_predict import pest
+from scripts.weather import weather
 
 app = FastAPI()
 
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Literal
 
 
 # GFS Data EndPoint
@@ -35,24 +38,43 @@ class GFSWeather(BaseModel):
     lon:float
     date:str
 
+@lru_cache(maxsize=5)
+def load_dataset(file_url: str):
+    print(f"Loading dataset from source: {file_url}")
+    content = requests.get(file_url, stream=True).content
+    return xr.open_dataset(BytesIO(content), engine="scipy").load()
+
+
 @app.post("/gfs-weather/")
-def get_GFSWeather(request:GFSWeather):
-    if request.date:
-        wth_folder = datetime.strptime(request.date,"%Y-%m-%d").strftime("%Y%m%d")
-        wth_file_url = f"https://nc.niruthi.in/ncfiles/{wth_folder}/{wth_folder}_daily.nc"
-        ds = xr.open_dataset(BytesIO(requests.get(wth_file_url,stream=True).content),engine="scipy")
-        ds = ds.isel(Date_time=slice(0,7)).sel(Latitude=request.lat,Longitude=request.lon,method='nearest')
-        print(ds)
-        
-        return json.dumps(dict(rain_sum=round(float(ds['Rainfall'].values.sum()),3),
-                    temp_min =round(float(ds['Tmin'].values.mean()),3),
-                    temp_max=round(float(ds['Tmax'].values.mean()),3),
-                    rh_min = round(float(ds['RH_min'].values.mean()),3),
-                    rh_max = round(float(ds['RH_max'].values.mean()),3)
-                    ))
+def get_GFSWeather(request: GFSWeather):
+    try:
+        if request.date:
+            wth_folder = datetime.strptime(request.date, "%Y-%m-%d").strftime("%Y%m%d")
+            wth_file_url = f"https://nc.niruthi.in/ncfiles/{wth_folder}/{wth_folder}_daily.nc"
+
+            ds = load_dataset(wth_file_url)
+
+            ds = ds.isel(Date_time=slice(0, 7)).sel(
+                Latitude=request.lat,
+                Longitude=request.lon,
+                method='nearest'
+            )
+
+            return {
+                "rain_sum": round(float(ds['Rainfall'].values.sum()), 3),
+                "temp_min": round(float(ds['Tmin'].values.mean()), 3),
+                "temp_max": round(float(ds['Tmax'].values.mean()), 3),
+                "rh_min": round(float(ds['RH_min'].values.mean()), 3),
+                "rh_max": round(float(ds['RH_max'].values.mean()), 3)
+            }
+
+    except Exception as e:
+        return {"error": str(e)}
 
 # Generate Adviosry End Point
 class WeeklyAdvisoryRequest(BaseModel):
+    state:str
+    district:str
     season: str
     crop_name: str
     sowing_date: str
@@ -81,6 +103,8 @@ async def crop_advisory(request: WeeklyAdvisoryRequest):
 
     print(
         "current date, sowing date:",
+        request.state,
+        request.district,
         request.season,
         request.crop_name,
         request.sowing_date,
@@ -91,6 +115,8 @@ async def crop_advisory(request: WeeklyAdvisoryRequest):
     )
 
     get_response = weekly_adviosry(
+        state=request.state,
+        district=request.district,
         season=request.season,
         crop_name=request.crop_name,
         sowing_date=request.sowing_date,
@@ -120,22 +146,20 @@ def clean_nan(obj):
 def get_config():
     return json.load(open("scripts/setup/input_config.json"))
 
-def get_crop_attributes_bydate(input_date:datetime,crop_db:DataFrame)->DataFrame:
+def get_crop_attributes_bydate(input_date:datetime,crop_db:pd.DataFrame)->pd.DataFrame:
     """
     To get attributes in non-growing season of crop, \ntakes date as input to fetch the adviosry content
     """
-    # day_of_month = input_date.timetuple().tm_mday
-    # month_of_year = input_date.timetuple().tm_mon
     current_year = input_date.year
     fixed_df = crop_db[crop_db['advisory_type']=='Fixed']
     date_time_values = list(zip(fixed_df.day_of_month,fixed_df.month_of_year))
     fixed_df['Date_col'] = [datetime(year=current_year,month=int(i[1]),day=int(i[0])) for i in date_time_values]
     fixed_df['date_difference'] = abs((fixed_df["Date_col"] - input_date)).apply(lambda x: x.days) # type: ignore
-    # print(fixed_df[['advisory_title','date_difference','day_of_month','month_of_year']])
-    # return crop_db[(crop_db['day_of_month']==day_of_month)&(crop_db['month_of_year']==month_of_year)]
-    return fixed_df.loc[fixed_df['date_difference']==min(fixed_df['date_difference'])]
+    fixed_df = fixed_df.loc[fixed_df['date_difference']==min(fixed_df['date_difference'])]
+    remove_cols = ['Date_col','date_difference']
+    return fixed_df.iloc[:,~fixed_df.columns.isin(remove_cols)]
 
-def get_crop_attributes_byweek(start_date:datetime,end_date:datetime,crop_db:DataFrame)->DataFrame:
+def get_crop_attributes_byweek(start_date:datetime,end_date:datetime,crop_db:pd.DataFrame)->pd.DataFrame:
     """
     Takes week (float) as input,\n filters andr returns crop_db dataframe by its crop week
     """
@@ -144,11 +168,13 @@ def get_crop_attributes_byweek(start_date:datetime,end_date:datetime,crop_db:Dat
 
 class dynamic_classes:
     #advisory_classes = ["Generic","Variety_selection","Nursery","Pest","Irrigation"]
-    def __init__(self,index_filtered_db:DataFrame,elevation:str|None,sowing_date:datetime,advisory_date:datetime,
-                 latitude:float,longitude:float,config,weather_dict:List[Dict[str, Any]] ,weather_input='Forecast')->None:
+    def __init__(self,index_filtered_db:pd.DataFrame,elevation:str|None,sowing_date:datetime,advisory_date:datetime,
+                 latitude:float,longitude:float,config,weather_dict:List[Dict[str, Any]] ,state:str,district:str,weather_input='Forecast')->None:
         """
         weather_input = 'forecast' or 'manual', default value = ['forecast'], if 'manual' is selected, user is expected to provide weather input
         """
+        self.state = state
+        self.district = district
         self.database = index_filtered_db.copy(deep=True)
         self.elevation = elevation
         self.advisory_date = advisory_date
@@ -159,7 +185,7 @@ class dynamic_classes:
         self.weather_input = weather_input
         self.weather_dict = weather_dict
     def manual_weather(self):
-        df = DataFrame(self.weather_dict)
+        df = pd.DataFrame(self.weather_dict)
         # print(df)
         rain_sum = df["Rainfall (mm)"].sum()
         tmin = df["Tmin (°C)"].mean()
@@ -174,15 +200,38 @@ class dynamic_classes:
             if self.database['advisory_class'].values[0] == "Pest":
                 print("checking in pest...")
                 if len(self.database)==1:
-                    infestsnap_info = infestsnap(state_name=self.database['state'].values[0],
-                                                crop_name=self.database['crop_name'].values[0],
-                                                lat=self.lat,lon=self.long,
-                                                sowing_date=self.sowing_date,season=self.database['season'].values[0],config=self.config).request()
-                    adv_content = format_text(pest_filepath=self.config['pest_info'],season=self.database['season'].values[0],crop=self.database['crop_name'].values[0],infestsnap_result=infestsnap_info)
-                    self.database['advisory_content'] = adv_content
-                    return self.database.to_dict(orient="records")
-                else:
-                    raise IndexError("\n Expecting one row in the database passed, received more than one row.")
+                    row = self.database.iloc[0]
+                    #******************** INFESTSNAP HARDCODE CROPS AND SEASONS *******************#
+                    INF_CROPS = ['Paddy','Potato']
+                    if row['season'] == 'Kharif' and row['crop_name'] in INF_CROPS:
+                        infestsnap_info = infestsnap(state_name=self.state,
+                                                    crop_name=row['crop_name'],
+                                                    lat=self.lat,lon=self.long,
+                                                    sowing_date=self.sowing_date,season=row['season'],config=self.config).request()
+                        adv_content = format_text(pest_filepath=self.config['pest_info'],season=row['season'],crop=row['crop_name'],infestsnap_result=infestsnap_info,source='infestsnap_2')
+                        row['advisory_content'] = adv_content
+                        return row.to_dict()
+                    
+                    #******************* UPDATED INFESTSNAP SECTION *****************************#
+                    # Except for kharif paddy and Potato - this section executes the prediciton for infestsnap
+                    else:
+                        infestsnap_info = pest(crop_name=row['crop_name'],
+                                               season=row['season'],
+                                               state= self.state,
+                                               district=self.district,
+                                               latitude=self.lat,
+                                               longitude=self.long,
+                                               sowing_date=self.sowing_date,
+                                               current_date= self.advisory_date
+                                               ).predict()
+                        infestsnap_info=infestsnap_info.rename(columns={'pest&disease_name':'pest_name'}).query('infestation_level != "Low"')
+                        print("checking infestation data: ",infestsnap_info)
+                        inf_adv = []
+                        for i,r in infestsnap_info.iterrows():
+                            adv_content = format_text(pest_filepath=self.config['pest_info'],season=row['season'],crop=row['crop_name'],infestsnap_result={'data':r.to_dict()},source='infestsnap_3')
+                            r['advisory_content'] = adv_content
+                            inf_adv.append(r.to_dict())      
+                        return inf_adv
             if self.database['advisory_class'].values[0] == "Variety_selection":
                 if isinstance(self.elevation,int):
                     if self.elevation <= 200:
@@ -271,8 +320,7 @@ class dynamic_classes:
                     # read weather file
                     wth_folder = self.advisory_date.strftime("%Y%m%d")
                     # wth_file_path = os.path.join(self.config['weather_dir'],os.path.join(f"{wth_folder}",f"{wth_folder}_daily.nc"))
-                    wth_file_url = f"http://nc.niruthi.in/ncfiles/{wth_folder}/{wth_folder}_daily.nc"
-                    print(wth_file_url)          
+                    wth_file_url = f"http://nc.niruthi.in/ncfiles/{wth_folder}/{wth_folder}_daily.nc"         
                     # Weather Probability
                     # forecast_data = weather(file_url=wth_file_path,latitude=self.lat,longitude=self.long).get_data()
                     forecast_data = weather(file_url=wth_file_url,latitude=self.lat,longitude=self.long).get_data()
@@ -293,13 +341,39 @@ class dynamic_classes:
             if self.database['advisory_class'].values[0] == "Pest":
                 print("checking in pest...")
                 if len(self.database)==1:
-                    infestsnap_info = infestsnap(state_name=self.database['state'].values[0],
-                                                crop_name=self.database['crop_name'].values[0],
-                                                lat=self.lat,lon=self.long,
-                                                sowing_date=self.sowing_date,season=self.database['season'].values[0],config=self.config).request()
-                    adv_content = format_text(pest_filepath=self.config['pest_info'],season=self.database['season'].values[0],crop=self.database['crop_name'].values[0],infestsnap_result=infestsnap_info)
-                    self.database['advisory_content'] = adv_content
-                    return self.database.to_dict(orient="records")
+                    row = self.database.iloc[0]
+                    #******************** INFESTSNAP HARDCODE CROPS AND SEASONS *******************#
+                    INF_CROPS = ['Paddy','Potato']
+                    if row['season'] == 'Kharif' and row['crop_name'] in INF_CROPS:
+                        infestsnap_info = infestsnap(state_name=self.state,
+                                                    crop_name=row['crop_name'],
+                                                    lat=self.lat,lon=self.long,
+                                                    sowing_date=self.sowing_date,season=row['season'],config=self.config).request()
+                        adv_content = format_text(pest_filepath=self.config['pest_info'],season=row['season'],crop=row['crop_name'],infestsnap_result=infestsnap_info,source='infestsnap_2')
+                        row['advisory_content'] = adv_content
+                        return row.to_dict()
+                    
+                    #******************* UPDATED INFESTSNAP SECTION *****************************#
+                    # Except for kharif paddy and Potato - this section executes the prediciton for infestsnap
+                    else:
+                        infestsnap_info = pest(crop_name=row['crop_name'],
+                                               season=row['season'],
+                                               state= self.state,
+                                               district=self.district,
+                                               latitude=self.lat,
+                                               longitude=self.long,
+                                               sowing_date=self.sowing_date,
+                                               current_date= self.advisory_date
+                                               ).predict()
+                        infestsnap_info=infestsnap_info.rename(columns={'pest&disease_name':'pest_name'})#.query('infestation_level != "Low"')
+                        print("infestation_prediction: ", infestsnap_info)
+                        inf_adv = []
+                        for i,r in infestsnap_info.iterrows():
+                            adv_content = format_text(pest_filepath=self.config['pest_info'],season=row['season'],crop=row['crop_name'],infestsnap_result={'data':r.to_dict()},source='infestsnap_3')
+                            r['advisory_content'] = adv_content
+                            inf_adv.append(r[['pest_name','infestation_level','advisory_content']].to_dict()) 
+                        row['advisory_content']=inf_adv
+                        return row.to_dict()
                 else:
                     raise IndexError("\n Expecting one row in the database passed, received more than one row.")
                     # sys.exit()
@@ -337,32 +411,42 @@ class infestsnap:
         else:
             raise Exception("No data to return...",json.loads(i_err.decode("utf-8")))
     
-def format_text(pest_filepath,season,crop,infestsnap_result): #type:ignore
+def format_text(pest_filepath,season,crop,infestsnap_result,source:Literal['infestsnap_2','infestsnap_3']): #type:ignore
     try:
-        pest_info = read_csv(pest_filepath,encoding="utf-8-sig")
+        pest_info = pd.read_csv(pest_filepath,encoding="utf-8-sig")
     except UnicodeDecodeError:
-        pest_info = read_csv(pest_filepath,encoding='windows-1252')
+        pest_info = pd.read_csv(pest_filepath,encoding='windows-1252')
     pest_info = pest_info[(pest_info['season']==season)&(pest_info['crop']==crop)]
     pest_info['Name of Disease and Insect'] = [i.strip() for i in pest_info['Name of Disease and Insect']]
-    try:
-        infestation_dict = infestsnap_result['data']
-        infest_adv_combined = ""
-        for inf in infestation_dict:
-            # print("INF: ",inf)
-            # if inf['infestation_level'] != "low":
-            pest_adviosry = pest_info[pest_info['Name of Disease and Insect']==inf['pest_name'].strip()]['Advisory'].values
-            # infest_text = f"Pest:{inf['pest_name']}, Infestation_level:{inf['infestation_level']}, Recommendation:{pest_adviosry}.; \n " ## infestsanp api response
-            infest_text = f"Pest:{inf['pest_name']}, Infestation_level:{inf['chances']['current_week']['infestation_level']}, Advisory:{pest_adviosry}.; \n " ## BMGF API Response
-            # print("\n",infest_text)
+    if source == "infestsnap_2":
+        try:
+            infestation_dict = infestsnap_result['data']
+            # print("Infestation dictionary: ",infestation_dict)
+            infest_adv_combined = ""
+            for inf in infestation_dict:
+                # print("INF: ",inf)
+                # if inf['infestation_level'] != "low" or inf['infestation_level'] != "Low":
+                pest_advisory = pest_info.iloc[0][pest_info['Name of Disease and Insect']==inf['pest_name'].strip()]['Advisory']
+                # infest_text = f"Pest:{inf['pest_name']}, Infestation_level:{inf['infestation_level']}, Recommendation:{pest_adviosry}.; \n " ## infestsanp api response
+                infest_text = f"Pest:{inf['pest_name']}, Infestation_level:{inf['chances']['current_week']['infestation_level']}, Advisory:{pest_advisory}.; \n " ## BMGF API Response
 
-            infest_adv_combined = infest_adv_combined+infest_text
-        return infest_adv_combined
-    except Exception as e:
-        traceback.print_exc()
-        print("\n",e,infestsnap_result)
+                # print("\n",infest_text)
+
+                infest_adv_combined = infest_adv_combined+infest_text
+            return infest_adv_combined
+        except Exception as e:
+            traceback.print_exc()
+            print("\n",e,infestsnap_result)
         
+    if source == 'infestsnap_3':
+        infestation_dict = infestsnap_result['data']
+        print(pest_info['Name of Disease and Insect'],infestation_dict['pest_name'].strip())
+        pest_advisory = pest_info[pest_info['Name of Disease and Insect'].str.lower()==infestation_dict['pest_name'].strip().lower()]['Advisory'].values[0]
+        return pest_advisory
+
+
 class non_growing_stage:
-    def __init__(self,latitude:float,longitude:float,adviosry_date:datetime,crop_db:DataFrame,unique_id:int = 0):
+    def __init__(self,latitude:float,longitude:float,adviosry_date:datetime,crop_db:pd.DataFrame,unique_id:int = 0):
         self.lat = latitude
         self.lon = longitude
         self.uid = unique_id
@@ -377,7 +461,7 @@ class probability:
     """
     Provides functionality to calculate probability of weather parameters for the given conditions in crop database to fetch adviosry
     """
-    def __init__(self,df:DataFrame,weather_dict:dict,config)->None:
+    def __init__(self,df:pd.DataFrame,weather_dict:dict,config)->None:
         self.df = df.copy()
         self.weather = weather_dict
         self.config = config
@@ -403,71 +487,7 @@ class probability:
         return probability_percent
 
 
-# class weather:
-#     """
-#     Provides functions to do operations related to weather data.
-#     """
-#     def __init__(self,file_path:str,latitude:float,longitude:float)->None:
-#         self.file = file_path
-#         self.lat = latitude
-#         self.long = longitude
-
-#     def get_data(self)->dict:
-#         """
-#         Fetchs weekly resampled weather parameter values
-#         """
-#         print("247weather_file: ",self.file)
-#         import xarray as xr
-#         self.weather = xr.open_mfdataset(self.file)
-#         self.rain_min = self.weather['Rainfall'].sel(Latitude=self.lat,Longitude=self.long,method='nearest').resample(Date_time="W").min().values[0]
-#         self.rain_max = self.weather['Rainfall'].sel(Latitude=self.lat,Longitude=self.long,method='nearest').resample(Date_time="W").max().values[0]
-#         self.rain_avg = self.weather['Rainfall'].sel(Latitude=self.lat,Longitude=self.long,method='nearest').resample(Date_time="W").mean().values[0]
-#         self.rain_sum = self.weather['Rainfall'].sel(Latitude=self.lat,Longitude=self.long,method='nearest').resample(Date_time="W").sum().values[0]
-#         self.temp_min = self.weather['Tmin'].sel(Latitude=self.lat,Longitude=self.long,method='nearest').resample(Date_time="W").mean().values[0]
-#         self.temp_max = self.weather['Tmax'].sel(Latitude=self.lat,Longitude=self.long,method='nearest').resample(Date_time="W").mean().values[0]
-#         self.rh_min = self.weather['RH_min'].sel(Latitude=self.lat,Longitude=self.long,method ='nearest').resample(Date_time="W").mean().values[0]
-#         self.rh_max = self.weather['RH_max'].sel(Latitude=self.lat,Longitude=self.long,method='nearest').resample(Date_time="W").mean().values[0]
-       
-#         self.weather.close()
-#         # print(dict(rain_sum=self.rain_sum,temp_min=self.temp_min,
-#         #             temp_max=self.temp_max,rh_min=self.rh_min,rh_max=self.rh_max))
-#         return dict(rain_sum=self.rain_sum,temp_min=self.temp_min,
-#                     temp_max=self.temp_max,rh_min=self.rh_min,rh_max=self.rh_max)
-
-class weather:
-    def __init__(self, file_url: str, latitude: float, longitude: float) -> None:
-
-        # self.file = requests.get(file_url) # if it is Hosted NAS Access
-        self.file = file_url # if accessing from Local NAS
-        self.lat = latitude
-        self.long = longitude
-
-    def get_data(self) -> dict:
-        print("weather_file in get data: ", self.file)
-        try:
-            self.weather = xr.open_dataset(BytesIO(requests.get(self.file,stream=True).content), engine="scipy") # if it is Hosted NAS Access
-            print("Weather File info: File read from public path.")
-            # self.weather = xr.open_dataset(self.file)  # if accessing from Local NAS
-            self.rain_min = self.weather['Rainfall'].sel(Latitude=self.lat, Longitude=self.long, method='nearest').resample(Date_time="W").min().values[0]
-            self.rain_max = self.weather['Rainfall'].sel(Latitude=self.lat, Longitude=self.long, method='nearest').resample(Date_time="W").max().values[0]
-            self.rain_avg = self.weather['Rainfall'].sel(Latitude=self.lat, Longitude=self.long, method='nearest').resample(Date_time="W").mean().values[0]
-            self.rain_sum = self.weather['Rainfall'].sel(Latitude=self.lat, Longitude=self.long, method='nearest').resample(Date_time="W").sum().values[0]
-            self.temp_min = self.weather['Tmin'].sel(Latitude=self.lat, Longitude=self.long, method='nearest').resample(Date_time="W").mean().values[0]
-            self.temp_max = self.weather['Tmax'].sel(Latitude=self.lat, Longitude=self.long, method='nearest').resample(Date_time="W").mean().values[0]
-            self.rh_min = self.weather['RH_min'].sel(Latitude=self.lat, Longitude=self.long, method='nearest').resample(Date_time="W").mean().values[0]
-            self.rh_max = self.weather['RH_max'].sel(Latitude=self.lat, Longitude=self.long, method='nearest').resample(Date_time="W").mean().values[0]
-
-            self.weather.close()
-            print(dict(rain_sum=self.rain_sum, temp_min=self.temp_min,
-                        temp_max=self.temp_max, rh_min=self.rh_min, rh_max=self.rh_max))
-            return dict(rain_sum=self.rain_sum, temp_min=self.temp_min,
-                        temp_max=self.temp_max, rh_min=self.rh_min, rh_max=self.rh_max)
-        except Exception as e:
-            print(f"⚠️ Could not open file: {self.file}\n{e}")
-            sys.exit()
-            return dict(rain_sum=0, temp_min=0, temp_max=0, rh_min=0, rh_max=0)
-
-def get_advisory_index(start_date:datetime,end_date:datetime,crop_db:DataFrame)->int:
+def get_advisory_index(start_date:datetime,end_date:datetime,crop_db:pd.DataFrame)->int:
     """
     Caluclates the index of the advisory to be sent, by calculating the weeks from swoing date to current date,\n
     then by getting number of adviosries in the filtered crop stage,\n
@@ -510,13 +530,13 @@ class sowing_date:
     def get_predicted_date(self) -> dict|None:
         if self.season == "Kharif":
             if self.crop == "Paddy":
-                sowing_dates = read_csv(self.config['Sowing_files']['Paddy_Kharif'])
+                sowing_dates = pd.read_csv(self.config['Sowing_files']['Paddy_Kharif'])
                 crop_sowing_dates = sowing_dates[sowing_dates['Crop_name']==self.crop]
             else:
-                sowing_dates = read_csv(self.config['Sowing_files']['Other_Kharif'])
+                sowing_dates = pd.read_csv(self.config['Sowing_files']['Other_Kharif'])
                 crop_sowing_dates = sowing_dates[sowing_dates['Crop_name']==self.crop]
         elif self.season == "Rabi":
-            sowing_dates = read_csv(self.config['Sowing_files']['All_Rabi'])
+            sowing_dates = pd.read_csv(self.config['Sowing_files']['All_Rabi'])
             crop_sowing_dates = sowing_dates[sowing_dates['Crop_name']==self.crop]
         del sowing_dates
 
@@ -544,8 +564,10 @@ def days_in_year(year: int) -> int:
     return (end - start).days
 class weekly_adviosry:
     # def __init__(self,season,crop_name,sowing_date,latitude,longitude,elevation:int|None,current_date=datetime.today()+timedelta(days=-1),realtime=0):
-    def __init__(self,season,crop_name,sowing_date,latitude,longitude,elevation:int|None,weather_input:str,weather_dict:List[Dict[str, Any]] ,current_date,realtime=0):
+    def __init__(self,state,district,season,crop_name,sowing_date,latitude,longitude,elevation:int|None,weather_input:str,weather_dict:List[Dict[str, Any]] ,current_date,realtime=0):
 
+        self.state = state
+        self.district = district
         self.season = season
         self.crop_name=crop_name
         self.sowing_date = datetime.strptime(sowing_date,"%Y-%m-%d")
@@ -559,9 +581,9 @@ class weekly_adviosry:
         self.config = json.load(open("input_config.json"))
     def generate(self):
         try:
-            crop_calendar = read_csv(self.config['crop_calendar'],encoding="utf-8-sig")
+            crop_calendar = pd.read_csv(self.config['crop_calendar'],encoding="utf-8-sig")
         except UnicodeDecodeError:
-            crop_calendar = read_csv(self.config['crop_calendar'],encoding="windows-1252")
+            crop_calendar = pd.read_csv(self.config['crop_calendar'],encoding="windows-1252")
         crop_calendar = crop_calendar[(crop_calendar['season']==self.season)&(crop_calendar['crop_name']==self.crop_name)]
         # pest_data = read_csv(self.config['pest_info'])
         advisory_dictionary=[]
@@ -582,9 +604,11 @@ class weekly_adviosry:
             
             #filter crop_calendar db by start and end week
             if IS_WEEKLY:
-                week_calendar = crop_calendar.dropna(subset=['cropstage_week_start','cropstage_week_end'])[(crop_calendar['cropstage_week_start']<(crop_week))&(crop_calendar['cropstage_week_end']>=(crop_week))]           
+                week_calendar = crop_calendar.dropna(subset=['cropstage_week_start','cropstage_week_end'])[(crop_calendar['cropstage_week_start']<(crop_week))&(crop_calendar['cropstage_week_end']>=(crop_week))]
+                print("week_ alendar:\n", week_calendar)        
                 for i in week_calendar['advisory_index'].unique():
                     adv_df = week_calendar[week_calendar['advisory_index']==i]
+                    print(adv_df)
                     if adv_df['advisory_type'].values[0]=="Dynamic":
                         advisory_data = dynamic_classes(index_filtered_db=adv_df,
                                                         elevation=100,  #type:ignore
@@ -593,16 +617,18 @@ class weekly_adviosry:
                                                         latitude=self.lat,
                                                         longitude=self.lon,
                                                         config=self.config,
+                                                        state=self.state,
+                                                        district = self.district,
                                                         weather_dict=self.weather_dict,weather_input=self.weather_input
                                                         ).generate()
                         if isinstance(advisory_data,list):
-                            advisory_dictionary.append(advisory_data[0])
+                            advisory_dictionary.append(advisory_data)
                         elif isinstance(advisory_data,dict):
                             advisory_dictionary.append(advisory_data)
                         else:
                             # print(type(advisory_data))
                             if advisory_data is not None:
-                                advisory_dictionary.append(advisory_data.to_dict(orient="records")) #type:ignore
+                                advisory_dictionary.append(advisory_data.to_dict()) #type:ignore
                             else:
                                 print(type(advisory_data))
                                 print("advisory_data is None, skipping")
@@ -611,11 +637,9 @@ class weekly_adviosry:
                         advisory_data = adv_df
                         advisory_dictionary.append(advisory_data.to_dict(orient='records')[0])
 
-                    else:
-                        advisory_data = non_growing_stage(latitude=self.lat,longitude=self.lon,adviosry_date=self.current_date,crop_db=crop_calendar).generate()
-                        advisory_dictionary.append(advisory_data.to_dict(orient="records")[0])
             else:
                 week_calendar = crop_calendar.dropna(subset=['cropstage_week_start','cropstage_week_end'])[(crop_calendar['cropstage_week_start']<(crop_week))&(crop_calendar['cropstage_week_end']>=(crop_week))]
+                print(week_calendar)
                 advisory_index = get_advisory_index(start_date=self.sowing_date,end_date=self.current_date,crop_db=week_calendar)
                 adv_df = week_calendar[week_calendar['advisory_index']==advisory_index]
                 if adv_df['advisory_type'].values[0]=="Dynamic":
@@ -626,10 +650,12 @@ class weekly_adviosry:
                                                         latitude=self.lat,
                                                         longitude=self.lon,
                                                         config=self.config,
+                                                        state=self.state,
+                                                        district = self.district,
                                                         weather_dict=self.weather_dict,weather_input=self.weather_input
                                                         ).generate()
                         if isinstance(advisory_data,list):
-                            advisory_dictionary.append(advisory_data[0])
+                            advisory_dictionary.append(advisory_data)
                         elif isinstance(advisory_data,dict):
                             advisory_dictionary.append(advisory_data)
                         else:
@@ -640,20 +666,17 @@ class weekly_adviosry:
                                 print(type(advisory_data))
                                 print("advisory_data is None, skipping")
 
-                elif adv_df['advisory_type'].values[0]=="Standard":
+                if adv_df['advisory_type'].values[0]=="Standard":
                     advisory_data = adv_df
                     advisory_dictionary.append(advisory_data.to_dict(orient='records')[0])
-
-                else:
-                    advisory_data = non_growing_stage(latitude=self.lat,longitude=self.lon,adviosry_date=self.current_date,crop_db=crop_calendar).generate()
-                    advisory_dictionary.append(advisory_data.to_dict(orient="records")[0])
                 
         else:
             advisory_data = non_growing_stage(latitude=self.lat,longitude=self.lon,adviosry_date=self.current_date,crop_db=crop_calendar).generate()
             advisory_dictionary.append(advisory_data.to_dict(orient="records")[0])
 
         # DataFrame(advisory_dictionary).to_csv("test1.csv",index=False)
-        return DataFrame(advisory_dictionary)
+        print(advisory_dictionary)
+        return pd.DataFrame(advisory_dictionary)
 
 
 def main():

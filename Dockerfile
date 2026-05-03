@@ -38,11 +38,11 @@ RUN pip install --upgrade pip && \
 COPY . .
 
 # -----------------------------
-# Expose FastAPI port
+# Expose port (internal)
 # -----------------------------
-EXPOSE 8090
+EXPOSE 8000
 
 # -----------------------------
-# Start FastAPI using Uvicorn
+# Start FastAPI (latest style)
 # -----------------------------
-CMD ["uvicorn", "weekly_advisory:app", "--host", "0.0.0.0", "--port", "8090"]
+CMD ["uvicorn", "weekly_advisory:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

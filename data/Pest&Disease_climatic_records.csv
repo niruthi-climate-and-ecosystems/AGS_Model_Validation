@@ -1,4 +1,4 @@
-﻿Season,Crop_Name,Pest/Disease_Name,State,Districts,Week1,Week2,Tmin1,Tmin2,Tmax1,Tmax2,Tavg1,Tavg2,RHavg1,RHavg2,RHmax1,RHmax2,RHmin1,RHmin2,Rain1,Rain2,SSH1,SSH2,Wind1,Wind2,pest_slug
+﻿season,crop_name,pest&disease_name,state,district,week1,week2,Tmin1,Tmin2,Tmax1,Tmax2,Tavg1,Tavg2,RHavg1,RHavg2,RHmax1,RHmax2,RHmin1,RHmin2,Rain1,Rain2,SSH1,SSH2,Wind1,Wind2,pest_slug
 Rabi,Blackgram,Powdery Mildew,Odisha,Angul,5,9,17,20,28,32,,,,,79,85,55,61,4,10,7,9,5,9,powdery-mildew
 Rabi,Blackgram,Powdery Mildew,Odisha,Balasore,5,9,18,22,28,32,,,,,82,88,60,66,3,9,6,8,6,10,powdery-mildew
 Rabi,Blackgram,Powdery Mildew,Odisha,Bargarh,6,10,19,22,29,33,,,,,78,84,54,60,2,7,8,10,6,10,powdery-mildew
